@@ -1,0 +1,299 @@
+openapi: 3.0.0
+info:
+  title: Blossom Media Server API
+  version: 1.0.0
+  description: |
+    Blossom is a protocol for a set of HTTP endpoints that allow users to store blobs of data on publicly accessible servers. 
+    Authorization is handled via Nostr events signed with public/private key pairs.
+    
+servers:
+  - url: "example.com"
+    description: Default server for Blossom blobs
+
+paths:
+  /{sha256}:
+    get:
+      summary: Retrieve a blob by its SHA256 hash
+      description: |
+        The `GET /{sha256}` endpoint retrieves the contents of the blob with the specified SHA256 hash.
+        Optionally, an authorization event may be required to access this blob.
+      parameters:
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+            description: SHA256 hash of the blob
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+            description: Nostr authorization event for access
+      responses:
+        '200':
+          description: Blob retrieved successfully
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Authorization required or invalid
+        '404':
+          description: Blob not found
+          
+    head:
+      summary: Check if a blob exists by its SHA256 hash
+      description: |
+        The `HEAD /{sha256}` endpoint checks if the blob exists on the server by its SHA256 hash.
+      parameters:
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+            description: SHA256 hash of the blob
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+            description: Nostr authorization event
+      responses:
+        '200':
+          description: Blob exists
+        '404':
+          description: Blob not found
+    delete:
+      summary: Delete a blob by its SHA256 hash
+      description: |
+        The `DELETE /{sha256}` endpoint removes the blob identified by its SHA256 hash. 
+        This operation must be authorized using a Nostr event signed by the user.
+      parameters:
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+            description: SHA256 hash of the blob to be deleted
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            description: Nostr authorization event for deletion
+      responses:
+        '200':
+          description: Blob deleted successfully
+        '401':
+          description: Missing or invalid authorization
+        '404':
+          description: Blob not found or already deleted
+
+  /upload:
+    head:
+      summary: Check upload requirements
+      description: |
+        The `HEAD /upload` endpoint checks whether a blob can be uploaded by validating the SHA256 hash, 
+        MIME type, and size of the blob. Optionally, this endpoint can accept an authorization event.
+      parameters:
+        - name: X-SHA-256
+          in: header
+          required: true
+          schema:
+            type: string
+            description: SHA256 hash of the blob to upload
+        - name: X-Content-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            description: MIME type of the blob
+        - name: X-Content-Length
+          in: header
+          required: true
+          schema:
+            type: integer
+            description: Size of the blob in bytes
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+            description: Nostr authorization event for the upload (optional)
+      responses:
+        '200':
+          description: Upload is permitted
+        '400':
+          description: Invalid request
+        '401':
+          description: Missing or invalid authorization
+        '403':
+          description: Upload not allowed (e.g., size or MIME type restriction)
+        '413':
+          description: Blob size too large
+        '415':
+          description: Unsupported MIME type
+    put:
+      summary: Upload a blob
+      description: |
+        The `PUT /upload` endpoint allows users to upload a new blob to the server. The blob is addressed by its SHA256 hash, 
+        and the upload must be authorized with a Nostr event signed by the user.
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            description: Nostr authorization event for uploading the blob
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Blob uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sha256:
+                    type: string
+                    description: SHA256 hash of the uploaded blob
+                  url:
+                    type: string
+                    description: URL where the blob can be retrieved
+                  size:
+                    type: integer
+                    description: Size of the blob in bytes
+                  uploaded:
+                    type: integer
+                    description: Unix timestamp of when the blob was uploaded
+        '400':
+          description: Invalid blob or request format
+        '401':
+          description: Missing or invalid authorization
+
+  /list/{pubkey}:
+    get:
+      summary: List blobs uploaded by a user
+      description: |
+        The `GET /list/{pubkey}` endpoint retrieves a list of blobs uploaded by a user, identified by their Nostr public key.
+        Optionally, the server may require authorization for listing blobs.
+      parameters:
+        - name: pubkey
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Nostr public key of the user
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+            description: Nostr authorization event (optional)
+        - name: since
+          in: query
+          schema:
+            type: integer
+            description: Only include blobs uploaded after this Unix timestamp
+        - name: until
+          in: query
+          schema:
+            type: integer
+            description: Only include blobs uploaded before this Unix timestamp
+      responses:
+        '200':
+          description: List of blobs uploaded by the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    sha256:
+                      type: string
+                      description: SHA256 hash of the blob
+                    url:
+                      type: string
+                      description: URL where the blob can be retrieved
+                    size:
+                      type: integer
+                      description: Size of the blob in bytes
+                    type:
+                      type: string
+                      description: MIME type of the blob (optional)
+                    uploaded:
+                      type: integer
+                      description: Unix timestamp of when the blob was uploaded
+        '401':
+          description: Authorization required or invalid
+        '404':
+          description: No blobs found for this user
+
+  /mirror:
+    put:
+      summary: Mirror a blob from a remote URL
+      description: |
+        The `PUT /mirror` endpoint allows users to mirror a blob from another server without directly uploading it. 
+        The request must contain a URL to the remote blob and an authorization event for the upload.
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            description: Nostr authorization event for mirroring the blob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  description: URL of the blob to be mirrored
+      responses:
+        '200':
+          description: Blob mirrored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sha256:
+                    type: string
+                    description: SHA256 hash of the mirrored blob
+                  url:
+                    type: string
+                    description: URL where the mirrored blob can be retrieved
+                  size:
+                    type: integer
+                    description: Size of the mirrored blob in bytes
+                  uploaded:
+                    type: integer
+                    description: Unix timestamp of when the blob was mirrored
+        '400':
+          description: Invalid request or unable to mirror blob
+        '401':
+          description: Missing or invalid authorization
+        '404':
+          description: Blob not found at remote URL
+
+components:
+  securitySchemes:
+    NostrEventAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Nostr event
+
+security:
+  - NostrEventAuth: []

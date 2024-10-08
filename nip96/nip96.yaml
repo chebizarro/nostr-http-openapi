@@ -1,0 +1,272 @@
+openapi: 3.0.0
+info:
+  description: "API for Nostr File Storage"
+  version: "1.0.0"
+  title: "Nostr File Storage API"
+servers:
+  - url: "https://your-file-server.example"
+    description: "Primary file server"
+security:
+  - jwtAuth: []
+
+components:
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /upload:
+    post:
+      summary: "Upload a file"
+      description: "Upload a file to the server"
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: "File to upload"
+                caption:
+                  type: string
+                  description: "Loose description of the file"
+                alt:
+                  type: string
+                  description: "Alt text for visibility-impaired users"
+                expiration:
+                  type: string
+                  description: "Expiration timestamp in UNIX seconds"
+                media_type:
+                  type: string
+                  description: "Type of media (e.g., avatar, banner)"
+        required: true
+      responses:
+        '200':
+          description: "File already exists"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+                  nip94_event:
+                    type: object
+                    properties:
+                      tags:
+                        type: array
+                        items:
+                          type: array
+                          items:
+                            type: string
+                      content:
+                        type: string
+        '201':
+          description: "File upload successful"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+                  nip94_event:
+                    type: object
+                    properties:
+                      tags:
+                        type: array
+                        items:
+                          type: array
+                          items:
+                            type: string
+                      content:
+                        type: string
+        '400':
+          description: "Invalid request"
+        '403':
+          description: "Forbidden"
+        '413':
+          description: "Payload too large"
+        '500':
+          description: "Internal server error"
+
+  /files/{hash}:
+    get:
+      summary: "Download a file"
+      description: "Download a file from the server"
+      parameters:
+        - name: "hash"
+          in: path
+          required: true
+          description: "SHA-256 hash of the file"
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "File downloaded successfully"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: "File not found"
+
+  /delete/{hash}:
+    delete:
+      summary: "Delete a file"
+      description: "Delete a file from the server"
+      parameters:
+        - name: "hash"
+          in: path
+          required: true
+          description: "SHA-256 hash of the file"
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "File deleted successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '403':
+          description: "Forbidden"
+        '404':
+          description: "File not found"
+        '500':
+          description: "Internal server error"
+
+  /list:
+    get:
+      summary: "List user files"
+      description: "List all files linked to the authenticated user's pubkey"
+      parameters:
+        - name: "Authorization"
+          in: header
+          description: "JWT token"
+          required: true
+          schema:
+            type: string
+        - name: "page"
+          in: query
+          description: "Page number"
+          schema:
+            type: integer
+        - name: "count"
+          in: query
+          description: "Number of items per page"
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: "List of user files"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        user_id:
+                          type: integer
+                        original_hash:
+                          type: string
+                        transformed_hash:
+                          type: string
+                        size:
+                          type: integer
+                        alt:
+                          type: string
+                        media_type:
+                          type: string
+                        content_type:
+                          type: string
+                        created_at:
+                          type: integer
+                        expiration:
+                          type: integer
+                        caption:
+                          type: string
+        '403':
+          description: "Forbidden"
+        '500':
+          description: "Internal server error"
+
+  /.well-known/nostr/nip96.json:
+    get:
+      summary: "NIP-96 Configuration"
+      description: "Get the NIP-96 configuration for this server"
+      responses:
+        '200':
+          description: "NIP-96 configuration"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_url:
+                    type: string
+                  download_url:
+                    type: string
+                  delegated_to_url:
+                    type: string
+                  supported_nips:
+                    type: array
+                    items:
+                      type: integer
+                  tos_url:
+                    type: string
+                  content_types:
+                    type: array
+                    items:
+                      type: string
+                  plans:
+                    type: object
+                    properties:
+                      free:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          is_nip98_required:
+                            type: boolean
+                          url:
+                            type: string
+                          max_byte_size:
+                            type: integer
+                          file_expiration:
+                            type: array
+                            items:
+                              type: integer
+                          media_transformations:
+                            type: object
+                            properties:
+                              image:
+                                type: array
+                                items:
+                                  type: string
