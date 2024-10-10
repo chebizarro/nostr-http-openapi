@@ -1,156 +1,188 @@
-# Nostr HTTP Server Endpoints
+# Nostr-Related HTTP Server Endpoints
 
-This repository contains OpenAPI specifications for various Nostr-related HTTP server endpoints, including:
+This repository contains OpenAPI specifications for various **Nostr-related HTTP server endpoints**, including:
 
-1. **Nostr File Storage API**: A file storage API that complies with NIP-96 and NIP-98, allowing for file uploads, downloads, and auth management through the Nostr protocol.
-2. **Blossom API**: A simple server that allows storing and retrieving blobs of data on publicly accessible servers via the Blossom protocol.
+1. **Nostr File Storage API**: A file storage API compliant with NIP-96 and NIP-98, enabling file uploads, downloads, and management through the Nostr protocol.
+2. **Blossom API**: A simple server for storing and retrieving blobs of data on publicly accessible servers via the Blossom protocol.
 
-The Go code for both of these APIs can be generated using the **OpenAPI v3** specification files provided in this repository.
+You can generate server or client code for these APIs in multiple programming languages using the OpenAPI specifications provided in this repository.
 
 ## Requirements
 
-Before you begin, ensure you have the following tools installed:
+- **OpenAPI Generator**: The primary tool used for generating code in different languages from OpenAPI specifications. You can install it via [Homebrew](https://brew.sh/) or use it directly via Docker.
 
-- **Go**: [Install Go](https://golang.org/doc/install) if you haven't already.
-- **ogen-go**: A Go code generator for OpenAPI v3 specs. You can install it by running:
+### Installing OpenAPI Generator
+
+- **Using Homebrew** (macOS):
   
   ```bash
-  go install github.com/ogen-go/ogen/cmd/ogen@latest
+  brew install openapi-generator
   ```
 
-## Structure of the Repository
+- **Using Docker**:
+  
+  ```bash
+  docker pull openapitools/openapi-generator-cli
+  ```
 
-```
-.
-├── nip96/nip96.yaml        # OpenAPI v3 spec for the Nostr File Storage API
-├── blossom/blossom.yaml    # OpenAPI v3 spec for the Blossom API
-└── README.md               # This README file
-```
+See the [OpenAPI Generator Docs](https://openapi-generator.tech/docs/installation) for more installation options.
 
-## How to Generate Go Code
+## Generating Code for the APIs
 
-You can use **ogen-go** to generate Go code from the OpenAPI YAML files. Follow the instructions below to generate Go code for each API.
+You can use **OpenAPI Generator** to generate server or client code for the **Nostr File Storage API** and **Blossom API** in multiple languages. Below are examples of how to generate code for some popular languages.
 
-### 1. Generate Go Code for the **Nostr File Storage API**
+### 1. Generate Go Code (Using `ogen-go` or OpenAPI Generator)
 
-The OpenAPI specification for the **Nostr File Storage API** is defined in `nostr-file-storage.yaml`. To generate Go server code for this API:
+The repository includes OpenAPI v3 specifications for both APIs. To generate Go code for either of them, you can use the **`ogen-go`** tool (for Go only) or **OpenAPI Generator**.
 
-1. **Navigate to the repository root**:
+#### For Go (Using **`ogen-go`**)
 
+1. **Nostr File Storage API**:
+   
    ```bash
-   cd /path/to/repo
+   ogen --target api/nostrfilestorage --package nostrfilestorage nostr-file-storage.yaml
    ```
 
-2. **Run the ogen-go code generator**:
-
+2. **Blossom API**:
+   
    ```bash
-   ogen --target api/nip96 --package nip96 nip96.yaml
+   ogen --target api/blossom --package blossom blossom.yaml
    ```
 
-   This command will:
-   - **Generate** Go types and handler interfaces in the `api/nostrfilestorage/` directory.
-   - **Set the package name** to `nostrfilestorage` for the generated code.
-
-3. **Implement the Handler**:
-
-   Once the code is generated, implement the `Handler` interface defined in the generated code. Example:
-
-   ```go
-   func (h *HandlerImpl) UploadPut(ctx context.Context, req UploadPutReq) (UploadPutRes, error) {
-       // Logic for handling file upload
-   }
-   ```
-
-4. **Start the Server**:
-
-   After implementing the required handlers, start the HTTP server using the generated router and your handler implementation.
-
-### 2. Generate Go Code for the **Blossom API**
-
-The OpenAPI specification for the **Blossom API** is defined in `blossom.yaml`. To generate Go server code for this API:
-
-1. **Navigate to the repository root**:
-
-   ```bash
-   cd /path/to/repo
-   ```
-
-2. **Run the ogen-go code generator**:
-
-   ```bash
-   ogen --target api --package blossom blossom/blossom.yaml
-   ```
-
-   This command will:
-   - **Generate** Go types and handler interfaces in the `api/blossom/` directory.
-   - **Set the package name** to `blossom` for the generated code.
-
-3. **Implement the Handler**:
-
-   Implement the generated `Handler` interface for the Blossom API. For example:
-
-   ```go
-   func (h *HandlerImpl) UploadPut(ctx context.Context, req UploadPutReq) (UploadPutRes, error) {
-       // Logic for handling blob upload
-   }
-   ```
-
-4. **Start the Server**:
-
-   Once you have implemented the handler logic, you can start the server by initializing the router with your handler.
-
-### 3. Integrating with Nostr
-
-Both APIs are designed to work in compliance with Nostr’s decentralized protocol. To ensure full NIP-96 and NIP-98 compliance for the Nostr File Storage API, refer to the `.well-known/nostr/nip96.json` endpoint and implement logic for content delegation and relays as per the NIPs.
-
-### Notes on Code Structure
-
-The generated Go code will follow the pattern:
-
-- **`openapi_types.go`**: Contains Go types, structs, and interfaces for request and response bodies as defined in the OpenAPI spec.
-- **`handler.go`**: Defines the `Handler` interface that must be implemented with your business logic.
-- **`router.go`**: Provides a router that maps API endpoints to the corresponding handler functions.
-
-### Additional Configuration
-
-You can customize the server configurations (such as ports, logging, etc.) by setting environment variables or using configuration files in your implementation.
-
-### Example Directory Layout After Code Generation
+#### For Go (Using **OpenAPI Generator**)
 
 ```bash
-.
-├── api/
-│   ├── nip96/
-│   │   ├── openapi_types.go      # Generated Go types for Nostr File Storage API
-│   │   ├── handler.go            # Generated Handler interface for Nostr File Storage API
-│   ├── blossom/
-│   │   ├── openapi_types.go      # Generated Go types for Blossom API
-│   │   ├── handler.go            # Generated Handler interface for Blossom API
-├── nip96/nip96.yaml       # OpenAPI v3 spec for Nostr File Storage API
-├── blossom/blossom.yaml                  # OpenAPI v3 spec for Blossom API
-└── README.md                     # This README file
+openapi-generator-cli generate -i nostr-file-storage.yaml -g go-server -o api/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g go-server -o api/blossom
 ```
 
-## Running the Server
+### 2. Generate TypeScript Code
 
-Once you have implemented the handler methods, you can start the server with Go's built-in HTTP server, or use a more advanced HTTP framework as per your needs.
+To generate TypeScript code, use the **`typescript-fetch`** or **`typescript-node`** generator options depending on whether you're creating a client or server.
 
-```go
-package main
+#### TypeScript Client (using Fetch API)
 
-import (
-    "log"
-    "net/http"
-    "yourrepo/api/nostrfilestorage"
-)
-
-func main() {
-    handler := &nostrfilestorage.HandlerImpl{}
-    router := nostrfilestorage.NewRouter(handler)
-
-    log.Println("Starting server on :8080")
-    log.Fatal(http.ListenAndServe(":8080", router))
-}
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g typescript-fetch -o typescript-client/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g typescript-fetch -o typescript-client/blossom
 ```
 
-For the Blossom API, follow a similar pattern using the generated `blossom` package.
+This will generate a TypeScript client that uses the Fetch API to interact with the Nostr File Storage and Blossom APIs.
+
+#### TypeScript Express Server
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g nodejs-express-server -o typescript-server/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g nodejs-express-server -o typescript-server/blossom
+```
+
+This will generate an **Express.js** server in TypeScript.
+
+### 3. Generate Rust Code
+
+To generate Rust client or server code, use the **`rust`** or **`rust-server`** generator options.
+
+#### Rust Client
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g rust -o rust-client/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g rust -o rust-client/blossom
+```
+
+This will generate a Rust client that can be used to interact with the Nostr File Storage and Blossom APIs.
+
+#### Rust Server
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g rust-server -o rust-server/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g rust-server -o rust-server/blossom
+```
+
+This will generate a Rust server that can handle the API requests according to the OpenAPI specification.
+
+### 4. Generate Node.js Code
+
+To generate Node.js client or server code, use the **`nodejs-express-server`** or **`javascript`** generator options.
+
+#### Node.js Express Server
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g nodejs-express-server -o node-server/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g nodejs-express-server -o node-server/blossom
+```
+
+This will generate a server based on **Express.js** for Node.js.
+
+#### Node.js Client
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g javascript -o node-client/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g javascript -o node-client/blossom
+```
+
+### 5. Generate C# Code
+
+To generate C# client or server code, use the `csharp` or `aspnetcore` generator options.
+
+#### C# Client
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g csharp -o csharp-client/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g csharp -o csharp-client/blossom
+```
+
+#### ASP.NET Core Server
+
+```bash
+openapi-generator-cli generate -i nostr-file-storage.yaml -g aspnetcore -o csharp-server/nostrfilestorage
+openapi-generator-cli generate -i blossom.yaml -g aspnetcore -o csharp-server/blossom
+```
+
+### 6. Other Languages
+
+OpenAPI Generator supports many other languages. You can check the full list of supported generators [here](https://openapi-generator.tech/docs/generators).
+
+For example, to generate PHP or Python code, you can use:
+
+- **PHP**:
+  
+  ```bash
+  openapi-generator-cli generate -i nostr-file-storage.yaml -g php -o php-client/nostrfilestorage
+  openapi-generator-cli generate -i blossom.yaml -g php -o php-client/blossom
+  ```
+
+- **Python**:
+  
+  ```bash
+  openapi-generator-cli generate -i nostr-file-storage.yaml -g python -o python-client/nostrfilestorage
+  openapi-generator-cli generate -i blossom.yaml -g python -o python-client/blossom
+  ```
+
+## Running the Generated Code
+
+Each language and framework will have its own way of running and testing the generated code. Typically, once the code is generated, follow these steps:
+
+1. **Install dependencies** (if needed):
+   - For **TypeScript**, run `npm install` or `yarn install`.
+   - For **Rust**, ensure you have the necessary Rust toolchain installed (`cargo`).
+   - For **Go**, make sure the `go.mod` file is correctly set up.
+
+2. **Implement the required handlers** for server code, or use the generated client to interact with the server.
+
+3. **Start the server** or run the client depending on the generated code structure.
+
+For example, to run a TypeScript Node.js server, navigate to the generated server directory and run:
+
+```bash
+npm start
+```
+
+Similarly, for a Rust server:
+
+```bash
+cargo run
+```
+
+## Notes on NIP-96 and NIP-98
+
+The **Nostr File Storage API** complies with NIP-96 and NIP-98, which deal with decentralized content storage and delegation. Make sure to handle the `.well-known/nostr/nip96.json` endpoint to configure the decentralized storage details.
