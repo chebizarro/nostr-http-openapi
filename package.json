@@ -1,0 +1,35 @@
+{
+  "name": "nostr-http-openapi",
+  "version": "1.0.0",
+  "description": "OpenAPI specifications for Blossom and NIP-96 file storage protocols",
+  "scripts": {
+    "validate": "./validate.sh",
+    "validate:blossom": "redocly lint blossom/blossom.yaml",
+    "validate:nip96": "redocly lint nip96/nip96.yaml",
+    "lint:blossom": "redocly lint blossom/blossom.yaml --extends=recommended",
+    "lint:nip96": "redocly lint nip96/nip96.yaml --extends=recommended",
+    "bundle:blossom": "redocly bundle blossom/blossom.yaml --output dist/blossom.yaml",
+    "bundle:nip96": "redocly bundle nip96/nip96.yaml --output dist/nip96.yaml",
+    "preview:blossom": "redocly preview-docs blossom/blossom.yaml",
+    "preview:nip96": "redocly preview-docs nip96/nip96.yaml",
+    "generate:go-blossom": "openapi-generator-cli generate -i blossom/blossom.yaml -g go-server -o generated/go/blossom",
+    "generate:go-nip96": "openapi-generator-cli generate -i nip96/nip96.yaml -g go-server -o generated/go/nip96",
+    "generate:ts-blossom": "openapi-generator-cli generate -i blossom/blossom.yaml -g typescript-fetch -o generated/typescript/blossom",
+    "generate:ts-nip96": "openapi-generator-cli generate -i nip96/nip96.yaml -g typescript-fetch -o generated/typescript/nip96"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^1.25.0",
+    "@openapitools/openapi-generator-cli": "^2.13.4",
+    "@stoplight/spectral-cli": "^6.11.0"
+  },
+  "keywords": [
+    "nostr",
+    "blossom",
+    "nip-96",
+    "openapi",
+    "file-storage",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT"
+}

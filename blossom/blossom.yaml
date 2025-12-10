@@ -3,150 +3,348 @@ info:
   title: Blossom Media Server API
   version: 1.0.0
   description: |
-    Blossom is a protocol for a set of HTTP endpoints that allow users to store blobs of data on publicly accessible servers. 
-    Authorization is handled via Nostr events signed with public/private key pairs.
+    Blossom is a protocol for a set of HTTP endpoints that allow users to store blobs of data on publicly accessible servers.
+    Blobs are addressed by their SHA256 hash and authorization is handled via Nostr events (kind 24242) signed with public/private key pairs.
+    
+    All endpoints MUST be served from the root of the domain per BUD-01.
+    All responses MUST include 'Access-Control-Allow-Origin: *' header for cross-origin compatibility.
+    Error responses (4xx/5xx) MAY include 'X-Reason' header with human-readable error messages.
     
 servers:
-  - url: "example.com"
-    description: Default server for Blossom blobs
+  - url: "https://cdn.example.com"
+    description: Example Blossom server
 
 paths:
   /{sha256}:
     get:
-      summary: Retrieve a blob by its SHA256 hash
+      summary: Retrieve a blob by its SHA256 hash (BUD-01)
       description: |
-        The `GET /{sha256}` endpoint retrieves the contents of the blob with the specified SHA256 hash.
-        Optionally, an authorization event may be required to access this blob.
+        The `GET /<sha256>(.ext)` endpoint returns the blob contents. File extension is optional but recommended.
+        Server MUST accept optional file extensions like .pdf, .png, .jpg, etc.
+        
+        Response MUST include:
+        - Content-Type header (MIME type, defaults to application/octet-stream)
+        - Content-Length header
+        - Access-Control-Allow-Origin: * header
+        
+        Server SHOULD support range requests (RFC 7233) and signal support via 'accept-ranges: bytes' header.
+        
+        Optional authorization (BUD-01): If server requires auth for retrieval, it must check:
+        - t tag = 'get'
+        - Either 'server' tag with full server URL OR 'x' tag matching the requested sha256
       parameters:
         - name: sha256
           in: path
           required: true
           schema:
             type: string
-            description: SHA256 hash of the blob
-        - name: Authorization
+            pattern: '^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$'
+          description: |
+            SHA256 hash of the blob with optional file extension.
+            Examples: 'b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf'
+                      'b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553'
+        - name: Range
           in: header
           required: false
           schema:
             type: string
-            description: Nostr authorization event for access
+          description: Range header for partial content requests (RFC 7233)
       responses:
         '200':
           description: Blob retrieved successfully
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the blob
+            Content-Length:
+              schema:
+                type: integer
+              description: Size of the blob in bytes
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+              description: Indicates server supports range requests
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+        '206':
+          description: Partial content (range request)
+          headers:
+            Content-Range:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+        '307':
+          description: |
+            Temporary redirect (optional, BUD-01). If used, redirect URL MUST contain same sha256 hash.
+        '308':
+          description: |
+            Permanent redirect (optional, BUD-01). If used, redirect URL MUST contain same sha256 hash.
         '401':
           description: Authorization required or invalid
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Human-readable error message
+        '402':
+          description: Payment required for download (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+              description: Cashu payment request per NUT-24
+            X-Lightning:
+              schema:
+                type: string
+              description: Lightning invoice per BOLT-11
+            X-Reason:
+              schema:
+                type: string
+              example: "Payment required to download blob"
         '404':
           description: Blob not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
           
     head:
-      summary: Check if a blob exists by its SHA256 hash
+      summary: Check if a blob exists by its SHA256 hash (BUD-01)
       description: |
-        The `HEAD /{sha256}` endpoint checks if the blob exists on the server by its SHA256 hash.
+        The `HEAD /<sha256>(.ext)` endpoint MUST be identical to GET except it does not return the blob body.
+        
+        Response MUST include same headers as GET:
+        - Content-Type
+        - Content-Length
+        - Access-Control-Allow-Origin: *
+        - accept-ranges: bytes (if range requests supported)
       parameters:
         - name: sha256
           in: path
           required: true
           schema:
             type: string
-            description: SHA256 hash of the blob
-        - name: Authorization
-          in: header
-          required: false
-          schema:
-            type: string
-            description: Nostr authorization event
+            pattern: '^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$'
+          description: SHA256 hash with optional file extension
       responses:
         '200':
           description: Blob exists
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+        '401':
+          description: Authorization required or invalid
+          headers:
+            X-Reason:
+              schema:
+                type: string
         '404':
           description: Blob not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
     delete:
-      summary: Delete a blob by its SHA256 hash
+      summary: Delete a blob by its SHA256 hash (BUD-02)
       description: |
-        The `DELETE /{sha256}` endpoint removes the blob identified by its SHA256 hash. 
-        This operation must be authorized using a Nostr event signed by the user.
+        The `DELETE /<sha256>(.ext)` endpoint removes the blob. Extension is optional.
+        
+        Authorization is REQUIRED (BUD-02). Server must verify:
+        - t tag = 'delete'
+        - At least one x tag matching the requested sha256
+        - Multiple x tags do NOT mean bulk delete - only delete the blob in the URL
+        
+        Server SHOULD reject deletes from non-owners with 403.
+        If multiple users uploaded same blob, server should only remove requesting user's pubkey from owners list.
       parameters:
         - name: sha256
           in: path
           required: true
           schema:
             type: string
-            description: SHA256 hash of the blob to be deleted
-        - name: Authorization
-          in: header
-          required: true
-          schema:
-            type: string
-            description: Nostr authorization event for deletion
+            pattern: '^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$'
+          description: SHA256 hash with optional file extension
+      security:
+        - NostrAuth: []
       responses:
         '200':
           description: Blob deleted successfully
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Blob deleted
         '401':
           description: Missing or invalid authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Human-readable error
+        '403':
+          description: User is not the owner of this blob
+          headers:
+            X-Reason:
+              schema:
+                type: string
         '404':
-          description: Blob not found or already deleted
+          description: Blob not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
   /upload:
     head:
-      summary: Check upload requirements
+      summary: Check upload requirements (BUD-06)
       description: |
-        The `HEAD /upload` endpoint checks whether a blob can be uploaded by validating the SHA256 hash, 
-        MIME type, and size of the blob. Optionally, this endpoint can accept an authorization event.
+        The `HEAD /upload` endpoint validates if a blob can be uploaded before sending data.
+        Uses custom headers to check hash, size, and MIME type against server requirements.
+        
+        Server MUST check X-SHA-256, X-Content-Type, X-Content-Length headers.
+        Server MAY require authorization (check t=upload, optional x tags).
+        
+        Returns 200 OK if upload permitted, or 4xx with X-Reason header explaining rejection.
       parameters:
         - name: X-SHA-256
           in: header
           required: true
           schema:
             type: string
-            description: SHA256 hash of the blob to upload
+            pattern: '^[a-f0-9]{64}$'
+          description: SHA256 hash of the blob to upload
         - name: X-Content-Type
           in: header
           required: true
           schema:
             type: string
-            description: MIME type of the blob
+          description: MIME type of the blob (e.g., image/png, application/pdf)
         - name: X-Content-Length
           in: header
           required: true
           schema:
             type: integer
-            description: Size of the blob in bytes
-        - name: Authorization
-          in: header
-          required: false
-          schema:
-            type: string
-            description: Nostr authorization event for the upload (optional)
+            minimum: 1
+          description: Size of the blob in bytes
       responses:
         '200':
           description: Upload is permitted
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
         '400':
-          description: Invalid request
+          description: Invalid request (e.g., malformed X-SHA-256 header)
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Human-readable error message
+              example: "Invalid X-SHA-256 header format. Expected a 64-character hex string."
         '401':
-          description: Missing or invalid authorization
+          description: Authorization required but missing or invalid
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Authorization required for uploading video files."
+        '402':
+          description: Payment required for upload (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+              description: Cashu payment request per NUT-24
+            X-Lightning:
+              schema:
+                type: string
+              description: Lightning invoice per BOLT-11
+            X-Reason:
+              schema:
+                type: string
+              example: "Payment required for uploads"
         '403':
-          description: Upload not allowed (e.g., size or MIME type restriction)
+          description: Upload forbidden (e.g., SHA256 hash banned)
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "SHA-256 hash banned."
+        '411':
+          description: Missing required header
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Missing X-Content-Length header."
         '413':
-          description: Blob size too large
+          description: Blob size exceeds server limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "File too large. Max allowed size is 100MB."
         '415':
           description: Unsupported MIME type
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Unsupported file type."
     put:
-      summary: Upload a blob
+      summary: Upload a blob (BUD-02)
       description: |
-        The `PUT /upload` endpoint allows users to upload a new blob to the server. The blob is addressed by its SHA256 hash, 
-        and the upload must be authorized with a Nostr event signed by the user.
-      parameters:
-        - name: Authorization
-          in: header
-          required: true
-          schema:
-            type: string
-            description: Nostr authorization event for uploading the blob
+        The `PUT /upload` endpoint accepts binary blob data. Server MUST NOT modify the blob in any way
+        to preserve hash integrity.
+        
+        Authorization is REQUIRED. Server must verify:
+        - t tag = 'upload'
+        - At least one x tag matching SHA256 hash of request body
+        - Optional payload tag with SHA256 hash of request body for additional verification
+        
+        Server MAY use Content-Type and Content-Length headers to infer blob metadata.
+        Server MUST link blob to uploader's pubkey for future deletion/listing.
+        
+        Response MUST be a complete BlobDescriptor with url (including file extension), sha256, size, type, uploaded.
+        Server MAY include optional fields like nip94, magnet, ipfs, infohash.
+      security:
+        - NostrAuth: []
       requestBody:
         required: true
         content:
@@ -156,144 +354,637 @@ paths:
               format: binary
       responses:
         '200':
-          description: Blob uploaded successfully
+          description: Blob already exists (existing hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  sha256:
-                    type: string
-                    description: SHA256 hash of the uploaded blob
-                  url:
-                    type: string
-                    description: URL where the blob can be retrieved
-                  size:
-                    type: integer
-                    description: Size of the blob in bytes
-                  uploaded:
-                    type: integer
-                    description: Unix timestamp of when the blob was uploaded
+                $ref: '#/components/schemas/BlobDescriptor'
+        '201':
+          description: Blob uploaded successfully (new hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobDescriptor'
         '400':
           description: Invalid blob or request format
+          headers:
+            X-Reason:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Missing or invalid authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '402':
+          description: Payment required for upload (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+              description: Cashu payment request per NUT-24
+            X-Lightning:
+              schema:
+                type: string
+              description: Lightning invoice per BOLT-11
+            X-Reason:
+              schema:
+                type: string
+              example: "Payment required to upload blob"
+        '403':
+          description: |
+            Forbidden - authorization failed (e.g., x tag hash doesn't match uploaded blob hash)
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '413':
+          description: Blob size exceeds server limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
   /list/{pubkey}:
     get:
-      summary: List blobs uploaded by a user
+      summary: List blobs uploaded by a user (BUD-02)
       description: |
-        The `GET /list/{pubkey}` endpoint retrieves a list of blobs uploaded by a user, identified by their Nostr public key.
-        Optionally, the server may require authorization for listing blobs.
+        The `GET /list/<pubkey>` endpoint returns an array of BlobDescriptors for blobs uploaded by the user.
+        
+        MUST support cursor-based pagination:
+        - cursor: SHA256 hash of last blob from previous page (omit for first page)
+        - limit: Maximum number of results to return
+        
+        Results MUST be sorted by 'uploaded' date in descending order.
+        Results MUST NOT include the blob at the cursor.
+        
+        since/until parameters are deprecated for pagination but MAY be supported for filtering.
+        
+        Server MAY require authorization (check t=list tag).
       parameters:
         - name: pubkey
           in: path
           required: true
           schema:
             type: string
-            description: Nostr public key of the user
-        - name: Authorization
-          in: header
+            pattern: '^[a-f0-9]{64}$'
+          description: Nostr public key (hex format) of the user
+        - name: cursor
+          in: query
           required: false
           schema:
             type: string
-            description: Nostr authorization event (optional)
+            pattern: '^[a-f0-9]{64}$'
+          description: |
+            SHA256 hash of the last blob from the previous page. Omit for first page.
+            Results will NOT include this blob.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+          description: Maximum number of blob descriptors to return
         - name: since
           in: query
+          required: false
           schema:
             type: integer
-            description: Only include blobs uploaded after this Unix timestamp
+          description: (Deprecated for pagination) Filter blobs uploaded after this Unix timestamp
         - name: until
           in: query
+          required: false
           schema:
             type: integer
-            description: Only include blobs uploaded before this Unix timestamp
+          description: (Deprecated for pagination) Filter blobs uploaded before this Unix timestamp
       responses:
         '200':
-          description: List of blobs uploaded by the user
+          description: Array of blob descriptors sorted by uploaded date descending
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    sha256:
-                      type: string
-                      description: SHA256 hash of the blob
-                    url:
-                      type: string
-                      description: URL where the blob can be retrieved
-                    size:
-                      type: integer
-                      description: Size of the blob in bytes
-                    type:
-                      type: string
-                      description: MIME type of the blob (optional)
-                    uploaded:
-                      type: integer
-                      description: Unix timestamp of when the blob was uploaded
+                  $ref: '#/components/schemas/BlobDescriptor'
         '401':
           description: Authorization required or invalid
+          headers:
+            X-Reason:
+              schema:
+                type: string
         '404':
-          description: No blobs found for this user
+          description: No blobs found for this user or pubkey not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
   /mirror:
     put:
-      summary: Mirror a blob from a remote URL
+      summary: Mirror a blob from a remote URL (BUD-04)
       description: |
-        The `PUT /mirror` endpoint allows users to mirror a blob from another server without directly uploading it. 
-        The request must contain a URL to the remote blob and an authorization event for the upload.
-      parameters:
-        - name: Authorization
-          in: header
-          required: true
-          schema:
-            type: string
-            description: Nostr authorization event for mirroring the blob
+        The `PUT /mirror` endpoint copies a blob from a URL instead of requiring direct upload.
+        
+        Request body MUST be JSON: {"url": "https://..."}
+        
+        Authorization type MUST be 'upload' (not 'mirror'). Server must verify:
+        - t tag = 'upload'
+        - At least one x tag - after download, server verifies blob hash matches one x tag
+        - Multiple x tags do NOT mean mirroring multiple blobs
+        
+        Flow:
+        1. Server downloads blob from provided URL
+        2. Server verifies sha256 hash matches an x tag in authorization
+        3. Server stores blob and returns BlobDescriptor
+        
+        Server SHOULD use Content-Type header from origin server to infer MIME type.
+        Server MAY use Content-Length header to determine size before download.
+      security:
+        - NostrAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - url
               properties:
                 url:
                   type: string
-                  description: URL of the blob to be mirrored
+                  format: uri
+                  description: URL of the blob to mirror (can be any HTTP/HTTPS URL)
+                  example: "https://cdn.satellite.earth/b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf"
       responses:
         '200':
-          description: Blob mirrored successfully
+          description: Blob already exists on this server (existing hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobDescriptor'
+        '201':
+          description: Blob mirrored successfully (new hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobDescriptor'
+        '400':
+          description: Invalid request (malformed URL, failed download, etc.)
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Failed to download blob from provided URL"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '402':
+          description: Payment required (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+              description: NUT-24 Cashu payment request (optional)
+              example: "creqApWF0gaNhdGVub3N0cmFheKlucHJvZmlsZTFxeTI4d3VtbjhnaGo3dW45ZDNzaGp0bnl2OWtoMnVld2Q5aHN6OW1od2RlbjV0ZTB3ZmprY2N0ZTljdXJ4dmVuOWVlaHFjdHJ2NWhzenJ0aHdkZW41dGUwZGVoaHh0bnZkYWtxcWd5ZGFxeTdjdXJrNDM5eWtwdGt5c3Y3dWRoZGh1NjhzdWNtMjk1YWtxZWZkZWhrZjBkNDk1Y3d1bmw1YWeBgmFuYjE3YWloYjdhOTAxNzZhYQphdWNzYXRhbYF4Imh0dHBzOi8vbm9mZWVzLnRlc3RudXQuY2FzaHUuc3BhY2U"
+            X-Lightning:
+              schema:
+                type: string
+              description: BOLT-11 Lightning invoice (optional)
+              example: "lnbc30n1pnnmw3lpp57727jjq8zxctahfavqacymellq56l70f7lwfkmhxfjva6dgul2zqhp5w48l28v60yvythn6qvnpq0lez54422a042yaw4kq8arvd68a6n7qcqzzsxqyz5vqsp5sqezejdfaxx5hge83tf59a50h6gagwah59fjn9mw2d5mn278jkys9qxpqysgqt2q2lhjl9kgfaqz864mhlsspftzdyr642lf3zdt6ljqj6wmathdhtgcn0e6f4ym34jl0qkt6gwnllygvzkhdlpq64c6yv3rta2hyzlqp8k28pz"
+            X-Reason:
+              schema:
+                type: string
+              example: "Payment required to mirror blob"
+        '403':
+          description: |
+            Forbidden - downloaded blob hash doesn't match any x tag in authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Downloaded blob hash does not match authorization x tags"
+        '404':
+          description: Blob not found at remote URL
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '413':
+          description: Blob size exceeds server limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
+  
+  /media:
+    head:
+      summary: Check media optimization requirements (BUD-05)
+      description: |
+        The `HEAD /media` endpoint validates if media can be optimized before sending data.
+        Similar to HEAD /upload but for the /media optimization endpoint.
+        
+        Server MUST check X-SHA-256, X-Content-Type, X-Content-Length headers.
+        Server MAY require authorization with t=media and x tags.
+      parameters:
+        - name: X-SHA-256
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+          description: SHA256 hash of the media to optimize
+        - name: X-Content-Type
+          in: header
+          required: true
+          schema:
+            type: string
+          description: MIME type of the media
+        - name: X-Content-Length
+          in: header
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Size of the media in bytes
+      responses:
+        '200':
+          description: Media optimization permitted
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+        '400':
+          description: Invalid request
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '401':
+          description: Authorization required but missing or invalid
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '402':
+          description: Payment required for media optimization (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+            X-Lightning:
+              schema:
+                type: string
+            X-Reason:
+              schema:
+                type: string
+        '403':
+          description: Media optimization forbidden
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '413':
+          description: Media size exceeds limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '415':
+          description: Unsupported media type
+          headers:
+            X-Reason:
+              schema:
+                type: string
+    
+    put:
+      summary: Upload and optimize media (BUD-05)
+      description: |
+        The `PUT /media` endpoint accepts media and performs optimization/conversion.
+        This is intentionally limited to optimizing a single blob for easier distribution.
+        
+        Server performs optimizations as it deems necessary (resize, compress, convert format, etc.)
+        Client has no control over optimization process - this is a "trusted processing" server.
+        
+        Authorization MAY be required with:
+        - t tag = 'media'
+        - At least one x tag matching SHA256 hash of request body
+        
+        Server MUST return BlobDescriptor of the NEW optimized blob (with different hash).
+        
+        For more complex transformations or client-specified processing, use other tools/protocols.
+      security:
+        - NostrAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Media already optimized (existing hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobDescriptor'
+        '201':
+          description: Media optimized successfully (new hash)
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobDescriptor'
+        '400':
+          description: Invalid media or request
+          headers:
+            X-Reason:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '402':
+          description: Payment required for media optimization (BUD-07)
+          headers:
+            X-Cashu:
+              schema:
+                type: string
+              description: Cashu payment request per NUT-24
+            X-Lightning:
+              schema:
+                type: string
+              description: Lightning invoice per BOLT-11
+            X-Reason:
+              schema:
+                type: string
+        '403':
+          description: Forbidden - authorization failed or x tag hash mismatch
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '413':
+          description: Media size exceeds server limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '415':
+          description: Unsupported media type
+          headers:
+            X-Reason:
+              schema:
+                type: string
+  
+  /report:
+    put:
+      summary: Report a blob (BUD-09)
+      description: |
+        The `PUT /report` endpoint allows users to report blobs to the server.
+        
+        Request body MUST be a signed NIP-56 report event with:
+        - kind: 1984
+        - One or more x tags containing blob SHA256 hashes
+        - Optional e or p tags pointing to events/profiles containing the media
+        - content: human-readable report details
+        
+        Server MUST respond with success or 4xx/5xx error.
+        
+        Servers MAY:
+        - Keep reports for operator review
+        - Use trusted moderator lists for automated action
+        - Consider removed blob hashes as blocked to prevent re-upload
+        - Advertise rules/TOS affecting report handling
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: NIP-56 report event (kind 1984)
+              required:
+                - id
+                - pubkey
+                - kind
+                - created_at
+                - tags
+                - content
+                - sig
+              properties:
+                id:
+                  type: string
+                  description: Event ID
+                pubkey:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+                  description: Reporter's public key (hex)
+                kind:
+                  type: integer
+                  enum: [1984]
+                  description: Must be 1984 (NIP-56 report)
+                created_at:
+                  type: integer
+                  description: Unix timestamp
+                tags:
+                  type: array
+                  description: Must include at least one x tag with blob hash
+                  items:
+                    type: array
+                    items:
+                      type: string
+                  example:
+                    - ["x", "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553", "illegal"]
+                    - ["x", "a1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd", "spam"]
+                content:
+                  type: string
+                  description: Human-readable report details
+                  example: "This blob contains illegal content"
+                sig:
+                  type: string
+                  description: Nostr signature
+      responses:
+        '200':
+          description: Report received successfully
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  sha256:
+                  message:
                     type: string
-                    description: SHA256 hash of the mirrored blob
-                  url:
-                    type: string
-                    description: URL where the mirrored blob can be retrieved
-                  size:
-                    type: integer
-                    description: Size of the mirrored blob in bytes
-                  uploaded:
-                    type: integer
-                    description: Unix timestamp of when the blob was mirrored
+                    example: "Report received"
         '400':
-          description: Invalid request or unable to mirror blob
+          description: Invalid report event
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              example: "Invalid NIP-56 event structure"
         '401':
-          description: Missing or invalid authorization
-        '404':
-          description: Blob not found at remote URL
+          description: Invalid signature
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '403':
+          description: Forbidden
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
 components:
   securitySchemes:
-    NostrEventAuth:
+    NostrAuth:
       type: http
-      scheme: bearer
-      bearerFormat: Nostr event
+      scheme: Nostr
+      description: |
+        Base64-encoded Nostr event (kind 24242) with required tags.
+        Format: 'Authorization: Nostr <base64-encoded-event>'
+        
+        Event structure:
+        - kind: 24242
+        - created_at: must be in the past
+        - expiration tag: must be in the future (NIP-40)
+        - t tag: verb matching endpoint action (get, upload, list, delete)
+        - x tag(s): SHA256 hash(es) for relevant blobs (endpoint-specific)
+        - content: human-readable description
+        
+        Example: Authorization: Nostr eyJpZCI6ImJiNjUzYzgxNWRhMThjMDg5ZjMxMjRi...
+  
+  schemas:
+    BlobDescriptor:
+      type: object
+      required:
+        - url
+        - sha256
+        - size
+        - type
+        - uploaded
+      properties:
+        url:
+          type: string
+          format: uri
+          description: |
+            Publicly accessible URL to the GET /<sha256> endpoint with file extension.
+            MUST include file extension for client compatibility.
+            Example: https://cdn.example.com/b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA256 hash of the blob (64 character hex string)
+        size:
+          type: integer
+          minimum: 0
+          description: Size of the blob in bytes
+        type:
+          type: string
+          description: MIME type of the blob (defaults to 'application/octet-stream' if unknown)
+          example: application/pdf
+        uploaded:
+          type: integer
+          description: Unix timestamp of when the blob was uploaded to the server
+          example: 1725105921
+        nip94:
+          type: array
+          description: Optional NIP-94 File Metadata tags (BUD-08)
+          items:
+            type: array
+            items:
+              type: string
+          example:
+            - ["url", "https://cdn.example.com/b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553.pdf"]
+            - ["m", "application/pdf"]
+            - ["x", "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553"]
+            - ["size", "184292"]
+        magnet:
+          type: string
+          description: Optional magnet link for BitTorrent distribution
+        ipfs:
+          type: string
+          description: Optional IPFS CID
+        infohash:
+          type: string
+          description: Optional BitTorrent infohash
+    
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
 
 security:
-  - NostrEventAuth: []
+  - NostrAuth: []
+  - {}

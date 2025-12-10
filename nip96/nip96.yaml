@@ -1,139 +1,476 @@
 openapi: 3.0.0
 info:
-  description: "API for Nostr File Storage"
+  description: |
+    NIP-96: HTTP File Storage Integration for Nostr
+    
+    This API enables nostr users to upload files and reference them by URL in nostr notes.
+    All endpoints served from $api_url as specified in /.well-known/nostr/nip96.json
+    
+    Authorization via NIP-98 HTTP Auth using kind 27235 Nostr events.
   version: "1.0.0"
-  title: "Nostr File Storage API"
+  title: "NIP-96 File Storage API"
 servers:
-  - url: "https://your-file-server.example"
-    description: "Primary file server"
+  - url: "https://your-file-server.example/api"
+    description: "Primary file server ($api_url from discovery document)"
 security:
-  - jwtAuth: []
+  - Nip98Auth: []
 
 components:
   securitySchemes:
-    jwtAuth:
+    Nip98Auth:
       type: http
-      scheme: bearer
-      bearerFormat: JWT
+      scheme: Nostr
+      description: |
+        NIP-98 HTTP Auth: Base64-encoded Nostr event (kind 27235) with required tags.
+        Format: 'Authorization: Nostr <base64-encoded-event>'
+        
+        Event structure:
+        - kind: 27235 (per RFC 7235)
+        - created_at: must be within reasonable time window (e.g., 60 seconds)
+        - u tag: MUST match absolute request URL including query parameters
+        - method tag: MUST match HTTP method (GET, POST, DELETE)
+        - payload tag (optional): SHA256 hash of request body as hex (for POST/PUT/PATCH)
+        
+        Server checks:
+        1. kind = 27235
+        2. created_at within time window
+        3. u tag matches request URL exactly
+        4. method tag matches HTTP method
+        5. (optional) payload tag matches SHA256(body)
+        
+        Example: Authorization: Nostr eyJpZCI6ImZlOTY0ZTc1ODkwMzM2MGYy...
+  
+  schemas:
+    Nip94Event:
+      type: object
+      description: |
+        NIP-94 File Metadata event structure (subset - omits id, pubkey, created_at, sig)
+      required:
+        - tags
+        - content
+      properties:
+        tags:
+          type: array
+          description: |
+            Array of tag arrays. Required tags: url, ox (original hash).
+            Optional: x (transformed hash), m (MIME type), size, dim, magnet, i, blurhash, etc.
+          items:
+            type: array
+            items:
+              type: string
+          example:
+            - ["url", "https://your-file-server.example/api/719171db19525d9d08dd69cb716a18158a249b7b3b3ec4bbdec5698dca104b7b.png"]
+            - ["ox", "719171db19525d9d08dd69cb716a18158a249b7b3b3ec4bbdec5698dca104b7b"]
+            - ["x", "543244319525d9d08dd69cb716a18158a249b7b3b3ec4bbde5435543acb34443"]
+            - ["m", "image/png"]
+            - ["dim", "800x600"]
+            - ["size", "123456"]
+        content:
+          type: string
+          description: Optional caption/description
+          example: ""
+    
+    UploadResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          enum: [success, error, processing]
+          description: "'success' if successful, 'error' if failed, 'processing' for delayed processing"
+        message:
+          type: string
+          description: Human-readable success, failure, or info message
+          example: "Upload successful."
+        processing_url:
+          type: string
+          format: uri
+          description: |
+            Optional. Temporary URL for checking processing status (202 Accepted response).
+            Poll this URL to check if delayed processing is complete.
+        nip94_event:
+          $ref: '#/components/schemas/Nip94Event'
+    
+    ProcessingStatus:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          enum: [processing, error]
+          description: "'processing' while in progress, 'error' if failed"
+        message:
+          type: string
+          example: "Processing. Please check again later for updated status."
+        percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Processing percentage (0-100)
+    
+    ListFilesResponse:
+      type: object
+      required:
+        - count
+        - total
+        - page
+        - files
+      properties:
+        count:
+          type: integer
+          description: Server page size (max of server limit and requested count)
+          example: 50
+        total:
+          type: integer
+          description: Total number of files for this user
+          example: 127
+        page:
+          type: integer
+          description: Current page number (0-indexed)
+          example: 0
+        files:
+          type: array
+          description: Array of NIP-94 file metadata events
+          items:
+            type: object
+            required:
+              - tags
+              - content
+              - created_at
+            properties:
+              tags:
+                type: array
+                description: NIP-94 tags (ox, x, size, alt, expiration, m, dim, etc.)
+                items:
+                  type: array
+                  items:
+                    type: string
+              content:
+                type: string
+                description: File caption/description
+              created_at:
+                type: integer
+                description: Upload timestamp (Unix seconds)
+    
+    ServerInfo:
+      type: object
+      required:
+        - api_url
+      properties:
+        api_url:
+          type: string
+          format: uri
+          description: |
+            File upload and deletion endpoint URL.
+            Also serves downloads if download_url is absent.
+            MUST be empty string if delegated_to_url is used.
+          example: "https://your-file-server.example/api"
+        download_url:
+          type: string
+          format: uri
+          description: |
+            Optional. If present, downloads served from this URL.
+            If absent/empty, downloads served from api_url.
+          example: "https://cdn.example.com"
+        delegated_to_url:
+          type: string
+          format: uri
+          description: |
+            Optional. For nostr relays redirecting to another server's nip96.json.
+            If present, api_url MUST be empty and all other fields absent.
+          example: "https://your-file-server.example"
+        supported_nips:
+          type: array
+          items:
+            type: integer
+          description: Optional. List of supported NIP numbers
+          example: [60, 94, 98]
+        tos_url:
+          type: string
+          format: uri
+          description: Optional. Terms of service URL
+          example: "https://your-file-server.example/terms"
+        content_types:
+          type: array
+          items:
+            type: string
+          description: Optional. Accepted MIME types (supports wildcards)
+          example: ["image/jpeg", "video/webm", "audio/*"]
+        plans:
+          type: object
+          description: |
+            Optional. Server plans/tiers.
+            'free' is the only standardized plan key.
+          additionalProperties:
+            type: object
+            properties:
+              name:
+                type: string
+                example: "Free Tier"
+              is_nip98_required:
+                type: boolean
+                default: true
+                description: All plans MUST support NIP-98, but some MAY allow uploads without it
+              url:
+                type: string
+                format: uri
+                description: Plan landing page
+              max_byte_size:
+                type: integer
+                description: Maximum file size in bytes
+                example: 10485760
+              file_expiration:
+                type: array
+                minItems: 2
+                maxItems: 2
+                items:
+                  type: integer
+                description: |
+                  [min_days, max_days]. 0 means no expiration.
+                  [7, 0] means 7 days to unlimited.
+                  [0, 0] means no expiration.
+                example: [14, 90]
+              media_transformations:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+                description: |
+                  Media type transformations supported.
+                  Keys: image, video, etc.
+                example:
+                  image: ["resizing"]
 
 paths:
+  /.well-known/nostr/nip96.json:
+    get:
+      summary: NIP-96 server discovery document
+      description: |
+        Returns server configuration including API endpoints, plans, supported features.
+        This endpoint SHOULD NOT require authentication.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Server configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerInfo'
+  
   /upload:
     post:
-      summary: "Upload a file"
-      description: "Upload a file to the server"
+      summary: Upload a file (NIP-96)
+      description: |
+        Upload a file as multipart/form-data to $api_url.
+        
+        NIP-98 Authorization REQUIRED. Server checks:
+        - u tag matches full request URL
+        - method tag = POST
+        - Optional: payload tag with SHA256 hash of file (base64-encoded in Authorization header)
+        
+        Response codes:
+        - 200 OK: File already exists (existing hash)
+        - 201 Created: File upload successful (new hash)
+        - 202 Accepted: File upload awaiting processing (check processing_url)
+        - 400 Bad Request: Invalid form data
+        - 402 Payment Required: Payment required (flow undefined)
+        - 403 Forbidden: Not allowed or hash mismatch
+        - 413 Payload Too Large: File size exceeds limit
+      security:
+        - Nip98Auth: []
       requestBody:
+        required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              required:
+                - file
               properties:
                 file:
                   type: string
                   format: binary
-                  description: "File to upload"
+                  description: "REQUIRED: File to upload"
                 caption:
                   type: string
-                  description: "Loose description of the file"
+                  description: "RECOMMENDED: Loose description"
                 alt:
                   type: string
-                  description: "Alt text for visibility-impaired users"
+                  description: "RECOMMENDED: Strict description for visibility-impaired users"
                 expiration:
                   type: string
-                  description: "Expiration timestamp in UNIX seconds"
+                  description: "UNIX timestamp in seconds. Empty string for permanent storage. Server may not honor."
+                  example: "1735689600"
+                size:
+                  type: integer
+                  description: "File byte size. Server can use for early rejection."
                 media_type:
                   type: string
-                  description: "Type of media (e.g., avatar, banner)"
-        required: true
+                  enum: [avatar, banner]
+                  description: "Informs server if file will be avatar/banner for special treatment"
+                content_type:
+                  type: string
+                  description: "MIME type (e.g., image/jpeg). Server can use for early rejection."
+                  example: "image/jpeg"
+                no_transform:
+                  type: string
+                  enum: ["true"]
+                  description: "Ask server not to transform file and serve as-is. May be rejected."
       responses:
         '200':
-          description: "File already exists"
+          description: File upload exists (existing hash)
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Optional human-readable message
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  message:
-                    type: string
-                  nip94_event:
-                    type: object
-                    properties:
-                      tags:
-                        type: array
-                        items:
-                          type: array
-                          items:
-                            type: string
-                      content:
-                        type: string
+                $ref: '#/components/schemas/UploadResponse'
         '201':
-          description: "File upload successful"
+          description: File upload successful (new hash)
+          headers:
+            X-Reason:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  message:
-                    type: string
-                  nip94_event:
-                    type: object
-                    properties:
-                      tags:
-                        type: array
-                        items:
-                          type: array
-                          items:
-                            type: string
-                      content:
-                        type: string
+                $ref: '#/components/schemas/UploadResponse'
+        '202':
+          description: |
+            File upload awaiting processing. Server will serve original file until processing completes.
+            Poll processing_url to check status.
+          headers:
+            X-Reason:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
         '400':
-          description: "Invalid request"
+          description: Invalid form data or unsupported request
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Human-readable error message
+        '402':
+          description: Payment required (flow undefined in NIP-96)
+          headers:
+            X-Reason:
+              schema:
+                type: string
         '403':
-          description: "Forbidden"
+          description: |
+            Forbidden - user not allowed or payload hash mismatch
+          headers:
+            X-Reason:
+              schema:
+                type: string
         '413':
-          description: "Payload too large"
-        '500':
-          description: "Internal server error"
+          description: File size exceeds server limit
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
-  /files/{hash}:
+  /{sha256-hash}:
     get:
-      summary: "Download a file"
-      description: "Download a file from the server"
+      summary: Download a file (NIP-96)
+      description: |
+        Download file from $api_url/<sha256-hash>(.ext)
+        
+        If download_url is set in /.well-known/nostr/nip96.json, downloads may be served from there instead.
+        However, server MUST still respond to downloads at the standard $api_url/<sha256-hash> format.
+        
+        File extension (.png, .pdf, etc.) is OPTIONAL but helps clients detect file type.
+        Example: $api_url/719171db19525d9d08dd69cb716a18158a249b7b3b3ec4bbdec5698dca104b7b.png
+        
+        Server should support query parameter transformations (e.g., ?w=32 for image width).
+      security:
+        - {}
+        - Nip98Auth: []
       parameters:
-        - name: "hash"
+        - name: sha256-hash
           in: path
           required: true
-          description: "SHA-256 hash of the file"
           schema:
             type: string
+            pattern: '^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$'
+          description: |
+            SHA-256 hash of ORIGINAL file (before transformations) with optional extension.
+            Examples: '719171db19525d9d08dd69cb716a18158a249b7b3b3ec4bbdec5698dca104b7b.png'
+                      '719171db19525d9d08dd69cb716a18158a249b7b3b3ec4bbdec5698dca104b7b'
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: |
+            Optional. Request image with desired pixel width (if server supports resizing).
+            Server serves variant with closest width or generates on-the-fly.
       responses:
         '200':
-          description: "File downloaded successfully"
+          description: File downloaded successfully
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the file
+            Content-Length:
+              schema:
+                type: integer
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
         '404':
-          description: "File not found"
+          description: File not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
-  /delete/{hash}:
     delete:
-      summary: "Delete a file"
-      description: "Delete a file from the server"
+      summary: Delete a file (NIP-96)
+      description: |
+        Delete file from $api_url/<sha256-hash>(.ext)
+        
+        NIP-98 Authorization REQUIRED. Server checks:
+        - u tag matches full delete URL
+        - method tag = DELETE
+        
+        Extension is optional. Hash is from ORIGINAL file before transformations.
+        
+        Server SHOULD reject deletes from users other than original uploader (403 Forbidden).
+        
+        Note: Multiple users may have uploaded same file (same hash).
+        Delete should only remove requesting user's pubkey from file owners list,
+        not actually delete the file if other users own it.
+      security:
+        - Nip98Auth: []
       parameters:
-        - name: "hash"
+        - name: sha256-hash
           in: path
           required: true
-          description: "SHA-256 hash of the file"
           schema:
             type: string
+            pattern: '^[a-f0-9]{64}(\.[a-zA-Z0-9]+)?$'
+          description: SHA-256 hash with optional extension
       responses:
         '200':
-          description: "File deleted successfully"
+          description: File deleted successfully
           content:
             application/json:
               schema:
@@ -141,132 +478,111 @@ paths:
                 properties:
                   status:
                     type: string
+                    example: success
                   message:
                     type: string
+                    example: "File deleted."
         '403':
-          description: "Forbidden"
+          description: User is not the owner
+          headers:
+            X-Reason:
+              schema:
+                type: string
+              description: Human-readable error
         '404':
-          description: "File not found"
-        '500':
-          description: "Internal server error"
+          description: File not found
+          headers:
+            X-Reason:
+              schema:
+                type: string
 
-  /list:
+  /:
     get:
-      summary: "List user files"
-      description: "List all files linked to the authenticated user's pubkey"
+      summary: List user files (NIP-96)
+      description: |
+        List files uploaded by authenticated user.
+        Endpoint: GET $api_url?page=x&count=y
+        
+        NIP-98 Authorization REQUIRED. Server checks:
+        - u tag matches full request URL including query params
+        - method tag = GET
+        
+        Returns paginated list of NIP-94 file metadata events.
+        Files array contains NIP-94 events (tags, content, created_at).
+      security:
+        - Nip98Auth: []
       parameters:
-        - name: "Authorization"
-          in: header
-          description: "JWT token"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Page number (0-indexed). offset = page * count
+        - name: count
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+          description: Number of items per page. Server enforces max.
+      responses:
+        '200':
+          description: List of user files (NIP-94 events)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListFilesResponse'
+        '401':
+          description: Missing or invalid authorization
+          headers:
+            X-Reason:
+              schema:
+                type: string
+        '403':
+          description: Forbidden
+          headers:
+            X-Reason:
+              schema:
+                type: string
+
+  /processing/{id}:
+    get:
+      summary: Check file processing status (NIP-96)
+      description: |
+        Optional endpoint for checking delayed file processing status.
+        URL provided in processing_url field of 202 Accepted upload response.
+        
+        - 200 OK with status='processing': Still processing
+        - 201 Created: Processing complete, returns full UploadResponse with nip94_event
+      security:
+        - {}
+        - Nip98Auth: []
+      parameters:
+        - name: id
+          in: path
           required: true
           schema:
             type: string
-        - name: "page"
-          in: query
-          description: "Page number"
-          schema:
-            type: integer
-        - name: "count"
-          in: query
-          description: "Number of items per page"
-          schema:
-            type: integer
+          description: Processing job ID
       responses:
         '200':
-          description: "List of user files"
+          description: Processing in progress
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  count:
-                    type: integer
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  files:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id:
-                          type: integer
-                        user_id:
-                          type: integer
-                        original_hash:
-                          type: string
-                        transformed_hash:
-                          type: string
-                        size:
-                          type: integer
-                        alt:
-                          type: string
-                        media_type:
-                          type: string
-                        content_type:
-                          type: string
-                        created_at:
-                          type: integer
-                        expiration:
-                          type: integer
-                        caption:
-                          type: string
-        '403':
-          description: "Forbidden"
-        '500':
-          description: "Internal server error"
-
-  /.well-known/nostr/nip96.json:
-    get:
-      summary: "NIP-96 Configuration"
-      description: "Get the NIP-96 configuration for this server"
-      responses:
-        '200':
-          description: "NIP-96 configuration"
+                $ref: '#/components/schemas/ProcessingStatus'
+        '201':
+          description: Processing complete
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  api_url:
-                    type: string
-                  download_url:
-                    type: string
-                  delegated_to_url:
-                    type: string
-                  supported_nips:
-                    type: array
-                    items:
-                      type: integer
-                  tos_url:
-                    type: string
-                  content_types:
-                    type: array
-                    items:
-                      type: string
-                  plans:
-                    type: object
-                    properties:
-                      free:
-                        type: object
-                        properties:
-                          name:
-                            type: string
-                          is_nip98_required:
-                            type: boolean
-                          url:
-                            type: string
-                          max_byte_size:
-                            type: integer
-                          file_expiration:
-                            type: array
-                            items:
-                              type: integer
-                          media_transformations:
-                            type: object
-                            properties:
-                              image:
-                                type: array
-                                items:
-                                  type: string
+                $ref: '#/components/schemas/UploadResponse'
+        '404':
+          description: Processing job not found
+          headers:
+            X-Reason:
+              schema:
+                type: string

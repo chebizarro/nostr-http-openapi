@@ -1,0 +1,19 @@
+# Redocly Configuration
+# https://redocly.com/docs/cli/configuration/
+
+extends:
+  - recommended
+
+rules:
+  # Relaxed rules for protocol-first approach
+  info-license: warn  # License is optional for protocol specs
+  operation-operationId: warn  # operationId is optional
+  no-server-example.com: off  # Allow example.com in examples
+  operation-4xx-response: warn  # Some operations may not need 4xx
+
+# API Configuration
+apis:
+  blossom@v1:
+    root: blossom/blossom.yaml
+  nip96@v1:
+    root: nip96/nip96.yaml
