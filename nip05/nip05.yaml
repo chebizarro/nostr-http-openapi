@@ -1,0 +1,139 @@
+openapi: 3.0.0
+info:
+  title: NIP-05 Nostr Identifier Lookup API
+  version: 1.0.0
+  description: |
+    NIP-05: Mapping Nostr keys to DNS-based internet identifiers
+    
+    This API provides a standard method for mapping email-like internet identifiers
+    (e.g., bob@example.com) to Nostr public keys. This enables user discovery and
+    verification of user identity through DNS-based lookups.
+    
+    The endpoint MUST be served at `/.well-known/nostr.json` with optional
+    `name` query parameter for lookups.
+    
+    Security: The endpoint MUST NOT return HTTP redirects, and clients MUST
+    ignore any redirects.
+
+servers:
+  - url: "https://example.com"
+    description: Domain serving NIP-05 identifiers
+
+paths:
+  /.well-known/nostr.json:
+    get:
+      summary: Look up Nostr public key by internet identifier
+      description: |
+        Returns a mapping of local-part names to hex-formatted Nostr public keys.
+        
+        Query parameter `name` specifies the local-part of the identifier being looked up.
+        For example, for identifier `bob@example.com`, the client requests
+        `https://example.com/.well-known/nostr.json?name=bob`
+        
+        The response contains a `names` object mapping names to public keys,
+        and optionally a `relays` object mapping public keys to relay URLs.
+        
+        **CORS Requirements:**
+        - MUST set `Access-Control-Allow-Origin: *` header
+        - JavaScript apps depend on CORS to validate identifiers
+        
+        **Security:**
+        - MUST NOT return HTTP redirects
+        - Clients MUST ignore any redirects
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[a-z0-9-_.]+$'
+          description: |
+            The local-part of the internet identifier.
+            Restricted to characters a-z0-9-_. (case-insensitive).
+            
+            Special case: `_` represents the root identifier for the domain.
+            Clients may display `_@example.com` as just `example.com`.
+          example: bob
+      responses:
+        '200':
+          description: Successful identifier lookup
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+              required: true
+              description: MUST be set to * for JavaScript client compatibility
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostrIdentifierResponse'
+        '404':
+          description: Identifier not found or name not provided
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+
+    options:
+      summary: CORS preflight
+      description: |
+        Handle CORS preflight requests.
+        MUST respond with appropriate CORS headers to allow JavaScript clients.
+      responses:
+        '200':
+          description: CORS preflight successful
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+                example: "*"
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+                example: "GET, OPTIONS"
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+                example: "*"
+
+components:
+  schemas:
+    NostrIdentifierResponse:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: object
+          description: |
+            Mapping of local-part names to hex-formatted Nostr public keys.
+            Keys are lowercased names, values are 64-character hex pubkeys.
+          additionalProperties:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+          example:
+            bob: "b0635d6a9851d3aed0cd6c495b282167acf761729078d975fc341b22650b07b9"
+            alice: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+            _: "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5"
+        relays:
+          type: object
+          description: |
+            Optional. Mapping of public keys to arrays of relay URLs.
+            Helps clients discover where to find a user's events.
+            
+            Servers serving dynamic responses SHOULD include relay information
+            for any names they serve.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+              format: uri
+              pattern: '^wss?://'
+          example:
+            b0635d6a9851d3aed0cd6c495b282167acf761729078d975fc341b22650b07b9:
+              - "wss://relay.example.com"
+              - "wss://relay2.example.com"
+
+security: []

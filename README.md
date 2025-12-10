@@ -2,16 +2,29 @@
 
 This repository contains **validated and complete** OpenAPI specifications for Nostr-related HTTP server endpoints:
 
+## File Storage Protocols
+
 1. **Blossom API** (`blossom/blossom.yaml`): Complete Blossom protocol (BUD-01 through BUD-10) with all mandatory and optional features including media optimization, payment flows, and content reporting.
 2. **NIP-96 File Storage API** (`nip96/nip96.yaml`): Full NIP-96 specification with NIP-98 authorization for file uploads, downloads, and management.
 
-Both specifications are **100% protocol-compliant** and ready for production code generation.
+## Core Nostr HTTP Protocols
+
+3. **NIP-05 Identifier Lookup** (`nip05/nip05.yaml`): DNS-based internet identifier to Nostr pubkey mapping via `/.well-known/nostr.json`
+4. **NIP-11 Relay Information** (`nip11/nip11.yaml`): Relay metadata and capabilities discovery document
+5. **NIP-57 Lightning Zaps** (`nip57/nip57.yaml`): LNURL pay integration with Nostr zap requests and receipts
+6. **NIP-86 Relay Management** (`nip86/nip86.yaml`): JSON-RPC relay administration API with NIP-98 authentication
+
+All specifications are **100% protocol-compliant** and ready for production code generation.
 
 ## ✅ Validation Status
 
-Both OpenAPI specs have been validated and tested:
+All OpenAPI specs have been validated and tested:
 - ✅ **Blossom API**: Valid OpenAPI 3.0 schema
 - ✅ **NIP-96 API**: Valid OpenAPI 3.0 schema
+- ✅ **NIP-05 API**: Valid OpenAPI 3.0 schema
+- ✅ **NIP-11 API**: Valid OpenAPI 3.0 schema
+- ✅ **NIP-57 API**: Valid OpenAPI 3.0 schema
+- ✅ **NIP-86 API**: Valid OpenAPI 3.0 schema
 - ✅ All endpoints match protocol requirements
 - ✅ Code generation tested across multiple languages
 

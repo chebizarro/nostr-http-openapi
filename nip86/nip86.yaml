@@ -1,0 +1,445 @@
+openapi: 3.0.0
+info:
+  title: NIP-86 Relay Management API
+  version: 1.0.0
+  description: |
+    NIP-86: Relay Management API
+    
+    JSON-RPC-like request-response protocol over HTTP for performing relay
+    management tasks. Available on the same URI as the relay's WebSocket.
+    
+    **Authorization:**
+    All requests MUST include NIP-98 `Authorization` header with:
+    - kind 27235 event
+    - `u` tag = relay URL
+    - `payload` tag = SHA256 hash of request body (REQUIRED for this API)
+    
+    If Authorization is missing or invalid, server MUST respond with 401.
+    
+    **Request Format:**
+    ```json
+    {
+      "method": "<method-name>",
+      "params": ["<array>", "<of>", "<parameters>"]
+    }
+    ```
+    
+    **Response Format:**
+    ```json
+    {
+      "result": {"<arbitrary>": "<value>"},
+      "error": "<optional error message>"
+    }
+    ```
+
+servers:
+  - url: "wss://relay.example.com"
+    description: Relay WebSocket URI (also serves HTTP management API)
+
+paths:
+  /:
+    post:
+      summary: Execute relay management method
+      description: |
+        Execute a relay management RPC method.
+        
+        The request is parsed as JSON with `method` and `params` fields.
+        Response contains either `result` (on success) or `error` (on failure).
+        
+        **Authorization Required:**
+        - NIP-98 Authorization header with kind 27235 event
+        - Event MUST have `payload` tag with SHA256 hash of request body
+        - Event MUST have `u` tag matching relay URL
+      security:
+        - Nip98Auth: []
+      requestBody:
+        required: true
+        content:
+          application/nostr+json+rpc:
+            schema:
+              $ref: '#/components/schemas/RPCRequest'
+            examples:
+              supportedmethods:
+                summary: Query supported methods
+                value:
+                  method: "supportedmethods"
+                  params: []
+              banpubkey:
+                summary: Ban a public key
+                value:
+                  method: "banpubkey"
+                  params:
+                    - "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+                    - "spam"
+              allowevent:
+                summary: Allow a specific event
+                value:
+                  method: "allowevent"
+                  params:
+                    - "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+                    - "manually reviewed"
+      responses:
+        '200':
+          description: RPC method executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RPCResponse'
+        '400':
+          description: Invalid request format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RPCResponse'
+        '401':
+          description: Missing or invalid authorization
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RPCResponse'
+
+components:
+  securitySchemes:
+    Nip98Auth:
+      type: http
+      scheme: Nostr
+      description: |
+        NIP-98 HTTP Auth: Base64-encoded kind 27235 event.
+        Format: 'Authorization: Nostr <base64-encoded-event>'
+        
+        For NIP-86, the event MUST include:
+        - kind: 27235
+        - u tag: relay URL
+        - method tag: "POST"
+        - payload tag: SHA256 hash of request body (REQUIRED)
+        - created_at: within reasonable time window
+        
+        Example: Authorization: Nostr eyJpZCI6ImZlOTY0ZTc1ODkw...
+
+  schemas:
+    RPCRequest:
+      type: object
+      required:
+        - method
+        - params
+      properties:
+        method:
+          type: string
+          description: RPC method name to execute
+          enum:
+            - supportedmethods
+            - banpubkey
+            - listbannedpubkeys
+            - allowpubkey
+            - listallowedpubkeys
+            - listeventsneedingmoderation
+            - allowevent
+            - banevent
+            - listbannedevents
+            - changerelayname
+            - changerelaydescription
+            - changerelayicon
+            - allowkind
+            - disallowkind
+            - listallowedkinds
+            - blockip
+            - unblockip
+            - listblockedips
+        params:
+          type: array
+          description: Array of parameters for the method
+          items: {}
+          example: []
+
+    RPCResponse:
+      type: object
+      properties:
+        result:
+          description: |
+            Result value (structure depends on method).
+            Present on success.
+        error:
+          type: string
+          description: |
+            Error message if call failed.
+            Absent on success.
+      oneOf:
+        - required: [result]
+        - required: [error]
+
+    BannedPubkeyEntry:
+      type: object
+      required:
+        - pubkey
+      properties:
+        pubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Banned public key (32-byte hex)
+        reason:
+          type: string
+          description: Optional reason for ban
+
+    AllowedPubkeyEntry:
+      type: object
+      required:
+        - pubkey
+      properties:
+        pubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Allowed public key (32-byte hex)
+        reason:
+          type: string
+          description: Optional reason for allowlist
+
+    EventEntry:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Event ID (32-byte hex)
+        reason:
+          type: string
+          description: Optional reason
+
+    IPEntry:
+      type: object
+      required:
+        - ip
+      properties:
+        ip:
+          type: string
+          description: IP address
+          example: "192.168.1.1"
+        reason:
+          type: string
+          description: Optional reason for blocking
+
+  examples:
+    SupportedMethodsResponse:
+      value:
+        result:
+          - "supportedmethods"
+          - "banpubkey"
+          - "listbannedpubkeys"
+          - "allowevent"
+          - "banevent"
+    
+    BanPubkeyResponse:
+      value:
+        result: true
+    
+    ListBannedPubkeysResponse:
+      value:
+        result:
+          - pubkey: "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+            reason: "spam"
+          - pubkey: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+            reason: "harassment"
+    
+    ListEventsNeedingModerationResponse:
+      value:
+        result:
+          - id: "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5"
+            reason: "reported content"
+    
+    ListAllowedKindsResponse:
+      value:
+        result: [0, 1, 3, 4, 5, 6, 7]
+    
+    ErrorResponse:
+      value:
+        error: "Unauthorized: invalid signature"
+
+security:
+  - Nip98Auth: []
+
+x-rpc-methods:
+  supportedmethods:
+    description: Returns array of supported method names
+    params: []
+    returns: 
+      type: array
+      items:
+        type: string
+  
+  banpubkey:
+    description: Ban a public key from relay
+    params:
+      - name: pubkey
+        type: string
+        required: true
+        description: 32-byte hex public key
+      - name: reason
+        type: string
+        required: false
+        description: Optional reason
+    returns:
+      type: boolean
+      const: true
+  
+  listbannedpubkeys:
+    description: List all banned public keys
+    params: []
+    returns:
+      type: array
+      items:
+        $ref: '#/components/schemas/BannedPubkeyEntry'
+  
+  allowpubkey:
+    description: Add public key to allowlist
+    params:
+      - name: pubkey
+        type: string
+        required: true
+      - name: reason
+        type: string
+        required: false
+    returns:
+      type: boolean
+      const: true
+  
+  listallowedpubkeys:
+    description: List allowed public keys
+    params: []
+    returns:
+      type: array
+      items:
+        $ref: '#/components/schemas/AllowedPubkeyEntry'
+  
+  listeventsneedingmoderation:
+    description: List events flagged for moderation
+    params: []
+    returns:
+      type: array
+      items:
+        $ref: '#/components/schemas/EventEntry'
+  
+  allowevent:
+    description: Allow a specific event
+    params:
+      - name: event_id
+        type: string
+        required: true
+      - name: reason
+        type: string
+        required: false
+    returns:
+      type: boolean
+      const: true
+  
+  banevent:
+    description: Ban a specific event
+    params:
+      - name: event_id
+        type: string
+        required: true
+      - name: reason
+        type: string
+        required: false
+    returns:
+      type: boolean
+      const: true
+  
+  listbannedevents:
+    description: List banned events
+    params: []
+    returns:
+      type: array
+      items:
+        $ref: '#/components/schemas/EventEntry'
+  
+  changerelayname:
+    description: Change relay name
+    params:
+      - name: name
+        type: string
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  changerelaydescription:
+    description: Change relay description
+    params:
+      - name: description
+        type: string
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  changerelayicon:
+    description: Change relay icon URL
+    params:
+      - name: icon_url
+        type: string
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  allowkind:
+    description: Allow event kind
+    params:
+      - name: kind
+        type: integer
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  disallowkind:
+    description: Disallow event kind
+    params:
+      - name: kind
+        type: integer
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  listallowedkinds:
+    description: List allowed event kinds
+    params: []
+    returns:
+      type: array
+      items:
+        type: integer
+  
+  blockip:
+    description: Block an IP address
+    params:
+      - name: ip
+        type: string
+        required: true
+      - name: reason
+        type: string
+        required: false
+    returns:
+      type: boolean
+      const: true
+  
+  unblockip:
+    description: Unblock an IP address
+    params:
+      - name: ip
+        type: string
+        required: true
+    returns:
+      type: boolean
+      const: true
+  
+  listblockedips:
+    description: List blocked IP addresses
+    params: []
+    returns:
+      type: array
+      items:
+        $ref: '#/components/schemas/IPEntry'

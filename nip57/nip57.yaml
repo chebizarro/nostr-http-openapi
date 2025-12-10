@@ -1,0 +1,314 @@
+openapi: 3.0.0
+info:
+  title: NIP-57 Lightning Zaps LNURL API
+  version: 1.0.0
+  description: |
+    NIP-57: Lightning Zaps
+    
+    This API documents the HTTP endpoints used for Lightning zaps in Nostr.
+    Zaps integrate LNURL pay protocol with Nostr events to create verifiable
+    lightning payments with social context.
+    
+    **Protocol Flow:**
+    1. Client fetches LNURL pay endpoint from user's profile (lud16 field or zap tag)
+    2. Client GET requests `/.well-known/lnurlp/<user>` to discover endpoint capabilities
+    3. If endpoint supports nostr (`allowsNostr: true`), client creates NIP-57 zap request
+    4. Client sends zap request to LNURL `callback` URL as query parameter
+    5. Server validates zap request and returns BOLT-11 invoice
+    6. Client pays invoice
+    7. Server publishes zap receipt (kind 9735) to specified relays
+    
+    **Note:** This spec covers the nostr-specific additions to LNURL.
+    Base LNURL protocol is defined at https://github.com/lnurl/luds
+
+servers:
+  - url: "https://example.com"
+    description: LNURL pay server with NIP-57 zap support
+
+paths:
+  /.well-known/lnurlp/{username}:
+    get:
+      summary: LNURL pay endpoint discovery
+      description: |
+        LUD-06/LUD-16 endpoint for Lightning Address resolution.
+        
+        Returns LNURL pay metadata including callback URL and nostr support.
+        If `allowsNostr` is true and `nostrPubkey` is present, the endpoint
+        supports NIP-57 zaps.
+        
+        The `nostrPubkey` is used by clients to validate zap receipts.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Username portion of Lightning Address (local-part)
+          example: bob
+      responses:
+        '200':
+          description: LNURL pay metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LNURLPayResponse'
+        '404':
+          description: User not found
+
+  /lnurlp/callback:
+    get:
+      summary: Request lightning invoice with zap metadata
+      description: |
+        LNURL pay callback endpoint. When nostr zaps are supported, this endpoint
+        accepts a `nostr` query parameter containing a base64-encoded zap request event.
+        
+        **Zap Request Validation (when nostr param present):**
+        1. MUST have valid nostr signature
+        2. MUST have tags
+        3. MUST have only one `p` tag
+        4. MUST have 0 or 1 `e` tags
+        5. SHOULD have `relays` tag with relay list
+        6. If `amount` tag present, MUST equal amount query parameter
+        7. If `a` tag present, MUST be valid event coordinate
+        8. MUST have 0 or 1 `P` tags (if present, equals zap receipt pubkey)
+        
+        Server MUST store the zap request for later use when invoice is paid.
+      parameters:
+        - name: amount
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Amount in millisatoshis
+          example: 21000
+        - name: nostr
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            URI-encoded, JSON-encoded kind 9734 zap request event.
+            Only present when requesting a zap invoice (not regular LNURL pay).
+        - name: lnurl
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Recipient's lnurl (bech32-encoded with prefix 'lnurl').
+            Recommended but optional.
+      responses:
+        '200':
+          description: Lightning invoice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LNURLInvoiceResponse'
+        '400':
+          description: Invalid request or zap request validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LNURLErrorResponse'
+
+components:
+  schemas:
+    LNURLPayResponse:
+      type: object
+      required:
+        - callback
+        - minSendable
+        - maxSendable
+        - tag
+      properties:
+        callback:
+          type: string
+          format: uri
+          description: URL to request invoice from
+          example: "https://example.com/lnurlp/callback"
+        minSendable:
+          type: integer
+          description: Minimum amount in millisatoshis
+          example: 1000
+        maxSendable:
+          type: integer
+          description: Maximum amount in millisatoshis
+          example: 100000000
+        tag:
+          type: string
+          enum: ["payRequest"]
+          description: LNURL tag type
+        metadata:
+          type: string
+          description: |
+            JSON-encoded metadata (LUD-06).
+            Array of [key, value] tuples describing the payment.
+          example: '[["text/plain","Payment to bob@example.com"]]'
+        allowsNostr:
+          type: boolean
+          description: |
+            NIP-57: If true, endpoint supports nostr zap requests.
+            Client should use NIP-57 flow instead of regular LNURL.
+          example: true
+        nostrPubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: |
+            NIP-57: Nostr pubkey server will use to sign zap receipts.
+            Clients use this to validate zap receipt events.
+          example: "9630f464cca6a5147aa8a35f0bcdd3ce485324e732fd39e09233b1d848238f31"
+        commentAllowed:
+          type: integer
+          description: Maximum comment length in characters (LUD-12)
+          example: 255
+
+    LNURLInvoiceResponse:
+      type: object
+      required:
+        - pr
+      properties:
+        pr:
+          type: string
+          description: |
+            BOLT-11 invoice string.
+            When issued for a zap request, description hash MUST commit to
+            the zap request event JSON.
+          example: "lnbc10u1p3unwfusp5t9r3yymhpfqculx78u027lxspgxcr2n2987mx2j55nnfs95nxnzqpp5jmrh92pfld78spqs78v9euf2385t83uvpwk9ldrlvf6ch7tpascqhp5zvkrmemgth3tufcvflmzjzfvjt023nazlhljz2n9hattj4f8jq8qxqyjw5qcqpjrzjqtc4fc44feggv7065fqe5m4ytjarg3repr5j9el35xhmtfexc42yczarjuqqfzqqqqqqqqlgqqqqqqgq9q9qxpqysgq079nkq507a5tw7xgttmj4u990j7wfggtrasah5gd4ywfr2pjcn29383tphp4t48gquelz9z78p4cq7ml3nrrphw5w6eckhjwmhezhnqpy6gyf0"
+        routes:
+          type: array
+          items:
+            type: object
+          description: Optional routing hints
+        successAction:
+          type: object
+          description: Optional success action (LUD-09)
+
+    LNURLErrorResponse:
+      type: object
+      required:
+        - status
+        - reason
+      properties:
+        status:
+          type: string
+          enum: ["ERROR"]
+        reason:
+          type: string
+          description: Human-readable error message
+          example: "Invalid zap request signature"
+
+    ZapRequestEvent:
+      type: object
+      description: |
+        Kind 9734 zap request event (not published to relays).
+        Sent as `nostr` query parameter to LNURL callback.
+      required:
+        - kind
+        - pubkey
+        - created_at
+        - tags
+        - content
+        - id
+        - sig
+      properties:
+        kind:
+          type: integer
+          enum: [9734]
+        pubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Sender's public key
+        created_at:
+          type: integer
+          description: Unix timestamp
+        tags:
+          type: array
+          description: |
+            Required tags:
+            - relays: list of relay URLs for zap receipt
+            - p: recipient pubkey (hex)
+            
+            Recommended tags:
+            - amount: amount in millisats as string
+            - lnurl: recipient's lnurl (bech32)
+            
+            Optional tags:
+            - e: event id being zapped (hex)
+            - a: event coordinate for addressable events
+            - k: stringified kind of target event
+          items:
+            type: array
+            items:
+              type: string
+          example:
+            - ["relays", "wss://relay.damus.io", "wss://nostr.wine"]
+            - ["amount", "21000"]
+            - ["lnurl", "lnurl1dp68gurn8ghj7um5v93kketj9ehx2amn9uh8wetvdskkkmn0wahz7mrww4excup0dajx2mrv92x9xp"]
+            - ["p", "04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9"]
+            - ["e", "9ae37aa68f48645127299e9453eb5d908a0cbb6058ff340d528ed4d37c8994fb"]
+        content:
+          type: string
+          description: Optional message/comment to send with zap
+          example: "Great post!"
+        id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        sig:
+          type: string
+          description: Nostr signature
+
+    ZapReceiptEvent:
+      type: object
+      description: |
+        Kind 9735 zap receipt event (published to relays by LNURL server).
+        Created when invoice from zap request is paid.
+        
+        This is NOT a proof of payment, only an attestation from the LNURL server.
+      required:
+        - kind
+        - pubkey
+        - created_at
+        - tags
+        - content
+        - id
+        - sig
+      properties:
+        kind:
+          type: integer
+          enum: [9735]
+        pubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: LNURL server's nostrPubkey
+        created_at:
+          type: integer
+          description: Invoice paid_at timestamp (for idempotency)
+        tags:
+          type: array
+          description: |
+            Required tags:
+            - p: zap recipient pubkey
+            - bolt11: description hash bolt11 invoice
+            - description: JSON-encoded zap request event
+            
+            Optional tags (from zap request):
+            - e: event id
+            - a: event coordinate
+            - P: zap sender pubkey
+            - k: target event kind
+            - preimage: payment preimage
+          items:
+            type: array
+            items:
+              type: string
+        content:
+          type: string
+          description: SHOULD be empty
+        id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        sig:
+          type: string
+
+security: []

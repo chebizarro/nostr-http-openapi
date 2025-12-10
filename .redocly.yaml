@@ -17,3 +17,11 @@ apis:
     root: blossom/blossom.yaml
   nip96@v1:
     root: nip96/nip96.yaml
+  nip05@v1:
+    root: nip05/nip05.yaml
+  nip11@v1:
+    root: nip11/nip11.yaml
+  nip57@v1:
+    root: nip57/nip57.yaml
+  nip86@v1:
+    root: nip86/nip86.yaml

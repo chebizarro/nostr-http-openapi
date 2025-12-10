@@ -1,0 +1,360 @@
+openapi: 3.0.0
+info:
+  title: NIP-11 Relay Information Document API
+  version: 1.0.0
+  description: |
+    NIP-11: Relay Information Document
+    
+    This API provides server metadata to clients to inform them of relay capabilities,
+    administrative contacts, limitations, and various server attributes.
+    
+    The information document is served as JSON over HTTP on the same URI as the
+    relay's WebSocket endpoint. When a relay receives an HTTP(s) request with an
+    `Accept` header of `application/nostr+json`, it returns this document.
+    
+    **CORS Requirements:**
+    Relays MUST accept CORS requests by sending:
+    - `Access-Control-Allow-Origin`
+    - `Access-Control-Allow-Headers`  
+    - `Access-Control-Allow-Methods`
+
+servers:
+  - url: "https://relay.example.com"
+    description: Example Nostr relay
+
+paths:
+  /:
+    get:
+      summary: Get relay information document
+      description: |
+        Returns relay metadata including capabilities, policies, and limitations.
+        
+        All fields are optional. Clients MUST ignore any additional fields they
+        do not understand.
+        
+        This endpoint is typically accessed by clients to discover relay features
+        before connecting via WebSocket.
+      parameters:
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: ["application/nostr+json"]
+          description: MUST be set to `application/nostr+json` to receive relay information
+      responses:
+        '200':
+          description: Relay information document
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+              required: true
+              description: MUST be present for CORS support
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+              required: true  
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+              required: true
+          content:
+            application/nostr+json:
+              schema:
+                $ref: '#/components/schemas/RelayInformation'
+
+    options:
+      summary: CORS preflight for relay information
+      description: Handle CORS preflight requests
+      responses:
+        '200':
+          description: CORS preflight successful
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+
+components:
+  schemas:
+    RelayInformation:
+      type: object
+      description: |
+        Relay metadata document. All fields are optional.
+        Clients MUST ignore unknown fields.
+      properties:
+        name:
+          type: string
+          description: Relay name for use in client software (< 30 characters recommended)
+          example: "JellyFish"
+        description:
+          type: string
+          description: |
+            Detailed plain-text information about the relay.
+            No markup or formatting. Use double newlines for paragraphs.
+          example: "Stay Immortal! A community relay for nostr users."
+        pubkey:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: |
+            Administrative contact pubkey (32-byte hex for secp256k1 public key).
+            Clients can send NIP-17 encrypted DMs to this address for support.
+          example: "bf2bee5281149c7c350f5d12ae32f514c7864ff10805182f4178538c2c421007"
+        self:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: |
+            Relay's own identity pubkey (32-byte hex).
+            Allows relay to respond with events signed by its own key.
+        contact:
+          type: string
+          format: uri
+          description: |
+            Alternative contact (URI format: mailto: or https:).
+            Nostr DM to pubkey is preferred.
+          example: "mailto:admin@example.com"
+        supported_nips:
+          type: array
+          items:
+            type: integer
+          description: Array of NIP numbers implemented by this relay
+          example: [1, 9, 11, 13, 17, 40, 42, 59, 62, 70]
+        software:
+          type: string
+          format: uri
+          description: URL to relay software project homepage
+          example: "https://github.com/dezh-tech/immortal"
+        version:
+          type: string
+          description: Software version number or commit identifier
+          example: "immortal - 0.0.9"
+        icon:
+          type: string
+          format: uri
+          description: |
+            URL to relay icon image (recommended square shape).
+            For use in UI with limited space.
+          example: "https://image.nostr.build/icon.jpg"
+        banner:
+          type: string
+          format: uri
+          description: |
+            URL to relay banner image.
+            Visual representation complementing the description.
+          example: "https://image.nostr.build/banner.jpg"
+        privacy_policy:
+          type: string
+          format: uri
+          description: URL to privacy policy document
+        terms_of_service:
+          type: string
+          format: uri
+          description: URL to terms of service document
+        relay_countries:
+          type: array
+          items:
+            type: string
+            pattern: '^([A-Z]{2}|\*)$'
+          description: |
+            ISO 3166-1 alpha-2 country codes whose laws may affect this relay.
+            Use 'EU' for European Union, '*' for global relays.
+          example: ["*"]
+        language_tags:
+          type: array
+          items:
+            type: string
+          description: |
+            IETF language tags for major languages spoken on relay.
+            Use '*' for global relays.
+          example: ["en", "en-419", "*"]
+        tags:
+          type: array
+          items:
+            type: string
+          description: |
+            Topic limitations or community tags.
+            Examples: "sfw-only", "bitcoin-only", "anime"
+          example: ["sfw-only"]
+        posting_policy:
+          type: string
+          format: uri
+          description: URL to human-readable posting policy
+          example: "https://jellyfish.land/tos.txt"
+        payments_url:
+          type: string
+          format: uri
+          description: URL for payment information
+          example: "https://relay.example.com/payments"
+        fees:
+          $ref: '#/components/schemas/RelayFees'
+        limitation:
+          $ref: '#/components/schemas/RelayLimitations'
+        retention:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetentionPolicy'
+          description: Event retention policies
+
+    RelayFees:
+      type: object
+      description: Fee schedules for pay-to-relay
+      properties:
+        admission:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fee'
+          description: One-time admission fee
+        subscription:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriptionFee'
+          description: Recurring subscription fees
+        publication:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicationFee'
+          description: Per-event publication fees
+
+    Fee:
+      type: object
+      required:
+        - amount
+        - unit
+      properties:
+        amount:
+          type: integer
+          description: Fee amount
+          example: 1000000
+        unit:
+          type: string
+          description: Unit of payment
+          enum: ["msats", "sats"]
+          example: "msats"
+
+    SubscriptionFee:
+      allOf:
+        - $ref: '#/components/schemas/Fee'
+        - type: object
+          required:
+            - period
+          properties:
+            period:
+              type: integer
+              description: Subscription period in seconds
+              example: 2628003
+
+    PublicationFee:
+      allOf:
+        - $ref: '#/components/schemas/Fee'
+        - type: object
+          properties:
+            kinds:
+              type: array
+              items:
+                type: integer
+              description: Event kinds this fee applies to
+              example: [4]
+
+    RelayLimitations:
+      type: object
+      description: |
+        Practical limitations imposed by relay.
+        Clients should expect requests exceeding these limits to be rejected.
+      properties:
+        max_message_length:
+          type: integer
+          description: |
+            Maximum bytes for incoming JSON (WebSocket frame size).
+            Measured from '[' to ']' after UTF-8 serialization.
+          example: 16384
+        max_subscriptions:
+          type: integer
+          description: Maximum active subscriptions per WebSocket connection
+          example: 20
+        max_limit:
+          type: integer
+          description: Server clamps each filter's limit to this number
+          example: 5000
+        max_subid_length:
+          type: integer
+          description: Maximum length of subscription ID string
+          example: 100
+        max_event_tags:
+          type: integer
+          description: Maximum elements in event tags array
+          example: 100
+        max_content_length:
+          type: integer
+          description: Maximum unicode characters in event content field
+          example: 8196
+        min_pow_difficulty:
+          type: integer
+          description: Minimum NIP-13 PoW difficulty required for events
+          example: 30
+        auth_required:
+          type: boolean
+          description: NIP-42 authentication required before other actions
+          example: false
+        payment_required:
+          type: boolean
+          description: Payment required before any action
+          example: true
+        restricted_writes:
+          type: boolean
+          description: |
+            Special conditions required to accept events.
+            Users expected to know policy (whitelist, specific kinds, etc.).
+            Normal anti-spam heuristics don't qualify.
+          example: true
+        created_at_lower_limit:
+          type: integer
+          description: created_at lower limit (seconds)
+          example: 31536000
+        created_at_upper_limit:
+          type: integer
+          description: created_at upper limit (seconds)
+          example: 3
+        default_limit:
+          type: integer
+          description: Maximum events returned if filter has no limit
+          example: 500
+
+    RetentionPolicy:
+      type: object
+      description: |
+        Event retention specification. Applies to kinds or all events.
+        Retention time in seconds, null = infinity, 0 = not stored.
+      properties:
+        kinds:
+          type: array
+          items:
+            oneOf:
+              - type: integer
+              - type: array
+                minItems: 2
+                maxItems: 2
+                items:
+                  type: integer
+          description: |
+            Event kinds this policy applies to.
+            Can specify ranges as [start, end] tuples (inclusive).
+          example: [[0, 1], [5, 7], [40, 49]]
+        time:
+          type: integer
+          nullable: true
+          description: |
+            Retention time in seconds.
+            null = infinity, 0 = not stored.
+          example: 3600
+        count:
+          type: integer
+          description: Maximum number of events to retain
+          example: 1000
+
+security: []
